@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Salience-guided recolouring</title>
+<style>
+  :root {
+    --bg: #14161c;
+    --panel: #1c1f28;
+    --panel-border: #2b2f3b;
+    --text: #e8e9ee;
+    --text-dim: #9296a6;
+    --accent: #e8a33d;
+    --accent-dim: #7a5a26;
+    --protan: #c0392b;
+    --deutan: #2e8b57;
+    --tritan: #3f7cac;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+  header {
+    padding: 2.5rem 1.5rem 1.5rem;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  header h1 {
+    font-size: 1.6rem;
+    font-weight: 600;
+    margin: 0 0 0.4rem;
+  }
+  header p {
+    color: var(--text-dim);
+    max-width: 60ch;
+    margin: 0;
+    font-size: 0.95rem;
+  }
+  .tabs {
+    display: flex;
+    gap: 0.5rem;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+  .tab-btn {
+    padding: 0.5rem 1rem;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid var(--panel-border);
+    border-bottom: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .tab-btn.active { background: var(--panel); color: var(--text); }
+  main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 1.5rem 3rem;
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 1.5rem;
+  }
+  @media (max-width: 720px) {
+    main { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+  }
+  .field { margin-bottom: 1.25rem; }
+  .field label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+  .field .hint {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 0.35rem;
+  }
+  .dropzone {
+    border: 1.5px dashed var(--panel-border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    text-align: center;
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    transition: border-color 0.15s;
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--accent); color: var(--text); }
+  .preview-media {
+    display: none;
+    width: 100%;
+    border-radius: 6px;
+    margin-top: 0.75rem;
+  }
+  .choice-group { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .choice {
+    flex: 1;
+    min-width: 80px;
+    padding: 0.5rem 0.25rem;
+    text-align: center;
+    border-radius: 6px;
+    border: 1px solid var(--panel-border);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .choice.selected {
+    border-color: var(--accent);
+    color: var(--text);
+    background: rgba(232, 163, 61, 0.1);
+  }
+  .choice[data-cvd="protan"].selected { border-color: var(--protan); background: rgba(192,57,43,0.15); }
+  .choice[data-cvd="deutan"].selected { border-color: var(--deutan); background: rgba(46,139,87,0.15); }
+  .choice[data-cvd="tritan"].selected { border-color: var(--tritan); background: rgba(63,124,172,0.15); }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .range-value { font-size: 0.8rem; color: var(--text-dim); text-align: right; }
+  .run-btn {
+    width: 100%;
+    padding: 0.75rem;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #1a1206;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  .run-btn:disabled { background: var(--accent-dim); color: #776a55; cursor: not-allowed; }
+
+  #results { min-height: 300px; }
+  .empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 300px;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 1.5rem;
+  }
+  .status {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 300px;
+    gap: 0.75rem;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 0 1rem;
+  }
+  .spinner {
+    width: 28px; height: 28px;
+    border: 3px solid var(--panel-border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-box {
+    display: none;
+    background: rgba(192, 57, 43, 0.1);
+    border: 1px solid var(--protan);
+    border-radius: 6px;
+    padding: 1rem;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+  }
+  .grid4 {
+    display: none;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+  .grid4 figure { margin: 0; }
+  .grid4 img { width: 100%; border-radius: 6px; display: block; }
+  .grid4 figcaption { font-size: 0.75rem; color: var(--text-dim); margin-top: 0.35rem; text-align: center; }
+  .video-result { display: none; }
+  .video-result p { font-size: 0.75rem; color: var(--text-dim); margin: 0.5rem 0 0; }
+  .player-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+  }
+  .player-controls button {
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid var(--panel-border);
+    background: transparent;
+    color: var(--text);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .player-controls input[type="range"] { flex: 1; }
+  .player-controls span { font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; }
+  #metrics, #metricsVideo {
+    display: none;
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--panel-border);
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  #metrics b, #metricsVideo b { color: var(--text); }
+  .boost-positive { color: #4caf7d; }
+  .boost-negative { color: #e0736a; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Salience-guided recolouring for colour vision deficiency</h1>
+  <p>Upload a photo or a short clip, pick a type and severity of colour vision deficiency, and run the actual attention-guided optimisation from the WACV 2025 paper.</p>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" id="tabImage" type="button">Image</button>
+  <button class="tab-btn" id="tabVideo" type="button">Video</button>
+</div>
+
+<main>
+  <!-- IMAGE PANEL -->
+  <form class="panel" id="imagePanel">
+    <div class="field">
+      <label for="fileInput">Photo</label>
+      <div class="dropzone" id="dropzone">Click to choose a photo, or drag one here</div>
+      <input type="file" id="fileInput" accept="image/*" style="display:none">
+      <img class="preview-media" id="preview" alt="Preview of the uploaded photo">
+    </div>
+
+    <div class="field">
+      <label>Colour vision deficiency type</label>
+      <div class="choice-group" id="cvdGroup">
+        <div class="choice selected" data-cvd="protan">Protanopia</div>
+        <div class="choice" data-cvd="deutan">Deuteranopia</div>
+        <div class="choice" data-cvd="tritan">Tritanopia</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Severity</label>
+      <div class="choice-group" id="severityGroup">
+        <div class="choice" data-severity="0.4">Mild</div>
+        <div class="choice" data-severity="0.6">Moderate</div>
+        <div class="choice selected" data-severity="1.0">High</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="epochs">Optimisation steps</label>
+      <input type="range" id="epochs" min="20" max="300" step="10" value="150">
+      <div class="range-value"><span id="epochsValue">150</span> epochs</div>
+    </div>
+
+    <button type="submit" class="run-btn" id="run">Recolour image</button>
+  </form>
+
+  <!-- VIDEO PANEL -->
+  <form class="panel" id="videoPanel" style="display:none">
+    <div class="field">
+      <label for="videoInput">Video clip</label>
+      <div class="dropzone" id="videoDropzone">Click to choose a video, or drag one here</div>
+      <input type="file" id="videoInput" accept="video/*" style="display:none">
+      <video class="preview-media" id="videoPreview" muted playsinline></video>
+    </div>
+
+    <div class="field">
+      <label>Colour vision deficiency type</label>
+      <div class="choice-group" id="cvdGroupVideo">
+        <div class="choice selected" data-cvd="protan">Protanopia</div>
+        <div class="choice" data-cvd="deutan">Deuteranopia</div>
+        <div class="choice" data-cvd="tritan">Tritanopia</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Severity</label>
+      <div class="choice-group" id="severityGroupVideo">
+        <div class="choice" data-severity="0.4">Mild</div>
+        <div class="choice" data-severity="0.6">Moderate</div>
+        <div class="choice selected" data-severity="1.0">High</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="maxFrames">Frames to process</label>
+      <input type="range" id="maxFrames" min="4" max="60" step="1" value="20">
+      <div class="range-value"><span id="maxFramesValue">20</span> frames, sampled evenly across the clip</div>
+    </div>
+
+    <div class="field">
+      <label for="sampleFps">Sampling rate</label>
+      <input type="range" id="sampleFps" min="0.2" max="5" step="0.2" value="1.0">
+      <div class="range-value"><span id="sampleFpsValue">1.0</span> frames/second (caps out at the frame limit above)</div>
+    </div>
+
+    <div class="field">
+      <label for="epochsVideo">Optimisation steps</label>
+      <input type="range" id="epochsVideo" min="20" max="300" step="10" value="100">
+      <div class="range-value"><span id="epochsVideoValue">100</span> epochs, applied jointly across all sampled frames</div>
+      <div class="hint" id="estimateHint"></div>
+    </div>
+
+    <button type="submit" class="run-btn" id="runVideo">Recolour video</button>
+  </form>
+
+  <!-- SHARED RESULTS -->
+  <div class="panel" id="results">
+    <div class="empty-state" id="emptyState">Upload a photo and choose a CVD type to see how attention-guided recolouring changes it.</div>
+
+    <div class="status" id="status">
+      <div class="spinner"></div>
+      <div id="statusText">Running the optimisation loop&hellip;</div>
+      <div id="statusTimer">0s elapsed</div>
+    </div>
+
+    <div class="error-box" id="errorBox"></div>
+
+    <div class="grid4" id="grid4">
+      <figure><img id="imgOriginal"><figcaption>Original</figcaption></figure>
+      <figure><img id="imgOriginalCvd"><figcaption>Original, as seen with CVD</figcaption></figure>
+      <figure><img id="imgRecoloured"><figcaption>Recoloured</figcaption></figure>
+      <figure><img id="imgRecolouredCvd"><figcaption>Recoloured, as seen with CVD</figcaption></figure>
+    </div>
+    <div id="metrics"></div>
+
+    <div class="video-result" id="videoResult">
+      <img id="framePlayer" style="width:100%; border-radius:6px; display:block;">
+      <div class="player-controls">
+        <button type="button" id="playPauseBtn">Pause</button>
+        <input type="range" id="frameScrub" min="0" max="0" step="1" value="0">
+        <span id="frameCounter">1 / 1</span>
+      </div>
+      <p>Top-left: original &middot; top-right: original as seen with CVD &middot; bottom-left: recoloured &middot; bottom-right: recoloured as seen with CVD.</p>
+    </div>
+    <div id="metricsVideo"></div>
+  </div>
+</main>
+
+<script>
+// ---------- shared helpers ----------
+function setupChoiceGroup(groupId) {
+  const group = document.getElementById(groupId);
+  group.addEventListener('click', e => {
+    const choice = e.target.closest('.choice');
+    if (!choice) return;
+    [...group.children].forEach(c => c.classList.remove('selected'));
+    choice.classList.add('selected');
+  });
+}
+['cvdGroup', 'severityGroup', 'cvdGroupVideo', 'severityGroupVideo'].forEach(setupChoiceGroup);
+
+function selectedValue(groupId, attr) {
+  return document.querySelector(`#${groupId} .choice.selected`).dataset[attr];
+}
+
+const emptyState = document.getElementById('emptyState');
+const status = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+const statusTimer = document.getElementById('statusTimer');
+const errorBox = document.getElementById('errorBox');
+const grid4 = document.getElementById('grid4');
+const metricsBox = document.getElementById('metrics');
+const videoResult = document.getElementById('videoResult');
+const metricsVideoBox = document.getElementById('metricsVideo');
+
+let timerInterval = null;
+
+function resetResultPanels() {
+  emptyState.style.display = 'none';
+  status.style.display = 'none';
+  errorBox.style.display = 'none';
+  grid4.style.display = 'none';
+  metricsBox.style.display = 'none';
+  videoResult.style.display = 'none';
+  metricsVideoBox.style.display = 'none';
+  if (typeof playerTimer !== 'undefined') clearInterval(playerTimer);
+}
+
+function startStatus(message) {
+  resetResultPanels();
+  status.style.display = 'flex';
+  statusText.textContent = message;
+  let elapsed = 0;
+  statusTimer.textContent = '0s elapsed';
+  timerInterval = setInterval(() => {
+    elapsed += 1;
+    statusTimer.textContent = `${elapsed}s elapsed`;
+  }, 1000);
+}
+
+function stopStatus() {
+  clearInterval(timerInterval);
+  status.style.display = 'none';
+}
+
+function showError(message, stderr) {
+  errorBox.textContent = message + (stderr ? '\n\n' + stderr : '');
+  errorBox.style.display = 'block';
+}
+
+// ---------- tab switching ----------
+const tabImage = document.getElementById('tabImage');
+const tabVideo = document.getElementById('tabVideo');
+const imagePanel = document.getElementById('imagePanel');
+const videoPanel = document.getElementById('videoPanel');
+
+tabImage.addEventListener('click', () => {
+  tabImage.classList.add('active');
+  tabVideo.classList.remove('active');
+  imagePanel.style.display = 'block';
+  videoPanel.style.display = 'none';
+  resetResultPanels();
+  emptyState.textContent = 'Upload a photo and choose a CVD type to see how attention-guided recolouring changes it.';
+  emptyState.style.display = 'flex';
+});
+tabVideo.addEventListener('click', () => {
+  tabVideo.classList.add('active');
+  tabImage.classList.remove('active');
+  videoPanel.style.display = 'block';
+  imagePanel.style.display = 'none';
+  resetResultPanels();
+  emptyState.textContent = 'Upload a short clip to see a frame-by-frame comparison video. Each sampled frame is optimised jointly with the others.';
+  emptyState.style.display = 'flex';
+});
+
+// ---------- IMAGE mode ----------
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+let selectedFile = null;
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
+
+function setFile(file) {
+  selectedFile = file;
+  preview.src = URL.createObjectURL(file);
+  preview.style.display = 'block';
+  dropzone.textContent = file.name;
+}
+
+const epochsSlider = document.getElementById('epochs');
+const epochsValue = document.getElementById('epochsValue');
+epochsSlider.addEventListener('input', () => { epochsValue.textContent = epochsSlider.value; });
+
+document.getElementById('imagePanel').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!selectedFile) { alert('Choose a photo first.'); return; }
+
+  const runButton = document.getElementById('run');
+  runButton.disabled = true;
+  startStatus('Running the optimisation loop\u2026');
+
+  const formData = new FormData();
+  formData.append('image', selectedFile);
+  formData.append('cvd_type', selectedValue('cvdGroup', 'cvd'));
+  formData.append('severity', selectedValue('severityGroup', 'severity'));
+  formData.append('max_epochs', epochsSlider.value);
+
+  try {
+    const res = await fetch('/api/run', { method: 'POST', body: formData });
+    const data = await res.json();
+    stopStatus();
+    runButton.disabled = false;
+
+    if (!res.ok) { showError(data.error || 'Something went wrong.', data.stderr); return; }
+
+    document.getElementById('imgOriginal').src = 'data:image/png;base64,' + data.original;
+    document.getElementById('imgOriginalCvd').src = 'data:image/png;base64,' + data.original_cvd;
+    document.getElementById('imgRecoloured').src = 'data:image/png;base64,' + data.recoloured;
+    document.getElementById('imgRecolouredCvd').src = 'data:image/png;base64,' + data.recoloured_cvd;
+    grid4.style.display = 'grid';
+
+    if (data.metrics) {
+      const m = data.metrics;
+      const boostClass = m.dalt_boost >= 0 ? 'boost-positive' : 'boost-negative';
+      const boostWord = m.dalt_boost >= 0 ? 'more' : 'less';
+      metricsBox.innerHTML = `
+        <b>Contrast under simulated CVD:</b> the recoloured image is
+        <span class="${boostClass}">${boostWord} distinguishable</span>
+        than the original (dalt_boost = ${m.dalt_boost.toFixed(3)}).<br>
+        Original contrast loss: ${m.base_cvd_base_error.toFixed(3)} &middot;
+        Recoloured contrast loss: ${m.daltonised_base_error.toFixed(3)} &middot;
+        Change energy: ${m.total_energy.toFixed(5)}
+      `;
+      metricsBox.style.display = 'block';
+    }
+  } catch (err) {
+    stopStatus();
+    runButton.disabled = false;
+    showError('Request failed: ' + err.message);
+  }
+});
+
+// ---------- VIDEO mode ----------
+const videoDropzone = document.getElementById('videoDropzone');
+const videoInput = document.getElementById('videoInput');
+const videoPreview = document.getElementById('videoPreview');
+let selectedVideo = null;
+
+videoDropzone.addEventListener('click', () => videoInput.click());
+videoDropzone.addEventListener('dragover', e => { e.preventDefault(); videoDropzone.classList.add('drag'); });
+videoDropzone.addEventListener('dragleave', () => videoDropzone.classList.remove('drag'));
+videoDropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  videoDropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) setVideoFile(e.dataTransfer.files[0]);
+});
+videoInput.addEventListener('change', () => { if (videoInput.files.length) setVideoFile(videoInput.files[0]); });
+
+function setVideoFile(file) {
+  selectedVideo = file;
+  videoPreview.src = URL.createObjectURL(file);
+  videoPreview.style.display = 'block';
+  videoDropzone.textContent = file.name;
+}
+
+const maxFramesSlider = document.getElementById('maxFrames');
+const maxFramesValue = document.getElementById('maxFramesValue');
+const sampleFpsSlider = document.getElementById('sampleFps');
+const sampleFpsValue = document.getElementById('sampleFpsValue');
+const epochsVideoSlider = document.getElementById('epochsVideo');
+const epochsVideoValue = document.getElementById('epochsVideoValue');
+const estimateHint = document.getElementById('estimateHint');
+
+// Rough estimate only, based on ~0.45s per (frame-batch x epoch) on an
+// RTX 2050-class GPU with batch_size 2 -- purely to set expectations.
+function updateEstimate() {
+  const frames = parseInt(maxFramesSlider.value, 10);
+  const epochs = parseInt(epochsVideoSlider.value, 10);
+  const batches = Math.ceil(frames / 2);
+  const seconds = batches * epochs * 0.45;
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  estimateHint.textContent = `Rough estimate: ~${minutes} min on this GPU`;
+}
+maxFramesSlider.addEventListener('input', () => { maxFramesValue.textContent = maxFramesSlider.value; updateEstimate(); });
+sampleFpsSlider.addEventListener('input', () => { sampleFpsValue.textContent = parseFloat(sampleFpsSlider.value).toFixed(1); });
+epochsVideoSlider.addEventListener('input', () => { epochsVideoValue.textContent = epochsVideoSlider.value; updateEstimate(); });
+updateEstimate();
+
+// ---------- frame-sequence player ----------
+const framePlayer = document.getElementById('framePlayer');
+const playPauseBtn = document.getElementById('playPauseBtn');
+const frameScrub = document.getElementById('frameScrub');
+const frameCounter = document.getElementById('frameCounter');
+
+let playerFrames = [];
+let playerFps = 1;
+let playerIndex = 0;
+let playerTimer = null;
+let playerPlaying = false;
+
+function showPlayerFrame(i) {
+  playerIndex = i;
+  framePlayer.src = 'data:image/png;base64,' + playerFrames[i];
+  frameScrub.value = i;
+  frameCounter.textContent = `${i + 1} / ${playerFrames.length}`;
+}
+
+function playerTick() {
+  showPlayerFrame((playerIndex + 1) % playerFrames.length);
+}
+
+function startPlayer(frames, fps) {
+  playerFrames = frames;
+  playerFps = fps > 0 ? fps : 1;
+  playerIndex = 0;
+  frameScrub.max = frames.length - 1;
+  showPlayerFrame(0);
+  setPlaying(true);
+}
+
+function setPlaying(playing) {
+  playerPlaying = playing;
+  playPauseBtn.textContent = playing ? 'Pause' : 'Play';
+  clearInterval(playerTimer);
+  if (playing) {
+    playerTimer = setInterval(playerTick, 1000 / playerFps);
+  }
+}
+
+playPauseBtn.addEventListener('click', () => setPlaying(!playerPlaying));
+frameScrub.addEventListener('input', () => {
+  setPlaying(false);
+  showPlayerFrame(parseInt(frameScrub.value, 10));
+});
+
+document.getElementById('videoPanel').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!selectedVideo) { alert('Choose a video first.'); return; }
+
+  const runButton = document.getElementById('runVideo');
+  runButton.disabled = true;
+  startStatus('Extracting frames and running the optimisation loop\u2026 this can take several minutes.');
+
+  const formData = new FormData();
+  formData.append('video', selectedVideo);
+  formData.append('cvd_type', selectedValue('cvdGroupVideo', 'cvd'));
+  formData.append('severity', selectedValue('severityGroupVideo', 'severity'));
+  formData.append('max_epochs', epochsVideoSlider.value);
+  formData.append('sample_fps', sampleFpsSlider.value);
+  formData.append('max_frames', maxFramesSlider.value);
+  formData.append('batch_size', '2');
+
+  try {
+    const res = await fetch('/api/run_video', { method: 'POST', body: formData });
+    const data = await res.json();
+    stopStatus();
+    runButton.disabled = false;
+
+    if (!res.ok) { showError(data.error || 'Something went wrong.', data.stderr); return; }
+
+    videoResult.style.display = 'block';
+    startPlayer(data.frames, data.fps);
+
+    if (data.metrics) {
+      const m = data.metrics;
+      const boostClass = m.dalt_boost >= 0 ? 'boost-positive' : 'boost-negative';
+      const boostWord = m.dalt_boost >= 0 ? 'more' : 'less';
+      metricsVideoBox.innerHTML = `
+        <b>Averaged over ${m.n_frames} sampled frames:</b> the recoloured video is on average
+        <span class="${boostClass}">${boostWord} distinguishable</span>
+        under simulated CVD than the original (mean dalt_boost = ${m.dalt_boost.toFixed(3)}).<br>
+        Mean original contrast loss: ${m.base_cvd_base_error.toFixed(3)} &middot;
+        Mean recoloured contrast loss: ${m.daltonised_base_error.toFixed(3)} &middot;
+        Mean change energy: ${m.total_energy.toFixed(5)}
+      `;
+      metricsVideoBox.style.display = 'block';
+    }
+  } catch (err) {
+    stopStatus();
+    runButton.disabled = false;
+    showError('Request failed: ' + err.message);
+  }
+});
+</script>
+
+</body>
+</html>
